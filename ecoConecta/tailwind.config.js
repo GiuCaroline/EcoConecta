@@ -10,12 +10,11 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'branco': '#FAFAFA',
-        'preto': {
-          DEFAULT: '#000',
-          dark: '#121212'
-        },
-        'verde': '#ebf5ee'
+        forest: "#166534",
+        mint: "#e9f4e5",
+        lime: "#c4f17b",
+        sand: "#f7f8f2",
+        ink: "#172c24",
       },
     },
   },
