@@ -1,8 +1,8 @@
-import { Feedback } from "../utils/feedback";
+import { useAction } from "../hooks/useAction";
 import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useApp } from "../context/AppContext";
-import { MATERIALS, ROLES } from "../data/mock";
+import { MATERIALS, ROLES } from "../data/catalog";
 import {
   Page,
   Heading,
@@ -15,7 +15,8 @@ import {
 } from "../components/UI";
 
 export function Profile({ navigation }) {
-  const { user, updateUser, logout, reset } = useApp();
+  const { user, logout } = useApp();
+  const { busy, run } = useAction("Conta");
   const items = [
     ["person-outline", "Editar meu perfil", "EditProfile"],
     ["notifications-outline", "Notificações", "Notifications"],
@@ -34,33 +35,13 @@ export function Profile({ navigation }) {
         <Text className="mt-1 text-sm text-slate-500">{user.email}</Text>
       </View>
       <Card>
-        <Text className="mb-1 text-lg font-bold text-ink">
-          Trocar perfil de demonstração
+        <Text className="text-lg font-bold text-ink">
+          {ROLES.find((r) => r.id === user.role)?.name}
         </Text>
-        <Text className="mb-4 text-sm leading-5 text-slate-500">
-          Teste o ciclo completo no mesmo aparelho. A identidade permanece a
-          mesma para visualizar seus pedidos.
+        <Text className="mt-2 text-sm leading-5 text-slate-500">
+          Este é o perfil cadastrado na sua conta. Para acessar outra conta,
+          saia e faça login novamente.
         </Text>
-        {ROLES.map((r) => (
-          <Pressable
-            accessibilityRole="radio"
-            accessibilityState={{ checked: user.role === r.id }}
-            key={r.id}
-            onPress={() => updateUser({ role: r.id })}
-            className={`mb-2 flex-row items-center gap-3 rounded-2xl border p-3 ${user.role === r.id ? "border-forest bg-mint" : "border-slate-100"}`}
-          >
-            <Icon name={r.icon} />
-            <View className="flex-1">
-              <Text className="font-bold text-ink">{r.name}</Text>
-              <Text className="mt-1 text-xs text-slate-500">
-                {r.description}
-              </Text>
-            </View>
-            <Icon
-              name={user.role === r.id ? "radio-button-on" : "radio-button-off"}
-            />
-          </Pressable>
-        ))}
       </Card>
       <Card>
         {items.map(([icon, label, screen]) => (
@@ -77,37 +58,21 @@ export function Profile({ navigation }) {
         ))}
       </Card>
       <Button
-        title="Sair do perfil"
+        title={busy ? "Saindo..." : "Sair da conta"}
         secondary
         icon="log-out-outline"
-        onPress={logout}
+        disabled={busy}
+        onPress={() => run(logout)}
       />
-      <Pressable
-        accessibilityRole="button"
-        onPress={() =>
-          Feedback.alert(
-            "Restaurar demonstração?",
-            "Isso remove os pedidos, pontos e perfis locais e restaura os exemplos iniciais.",
-            [
-              { text: "Manter dados", style: "cancel" },
-              { text: "Restaurar", style: "destructive", onPress: reset },
-            ],
-          )
-        }
-        className="p-4"
-      >
-        <Text className="text-center text-sm font-semibold text-slate-500">
-          Restaurar dados de exemplo
-        </Text>
-      </Pressable>
       <Text className="mt-4 text-center text-xs text-slate-400">
-        EcoConecta · Frontend demonstrativo · v1.0
+        EcoConecta · Conta conectada
       </Text>
     </Page>
   );
 }
 export function EditProfile({ navigation }) {
   const { user, updateUser } = useApp();
+  const { busy, run } = useAction("Não foi possível salvar o perfil");
   const [form, setForm] = useState({
     name: user.name,
     phone: user.phone || "",
@@ -124,14 +89,26 @@ export function EditProfile({ navigation }) {
       next.phone = "Informe um telefone com DDD.";
     setErrors(next);
     if (Object.keys(next).length) return;
-    updateUser({ ...form, name: form.name.trim() });
-    navigation.goBack();
+    run(async () => {
+      const values = {
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        address: form.address.trim(),
+      };
+      if (user.role === "driver")
+        Object.assign(values, {
+          vehicle: form.vehicle.trim(),
+          plate: form.plate.trim(),
+        });
+      await updateUser(values);
+      navigation.goBack();
+    });
   }
   return (
     <Page>
       <Heading
         title="Seu perfil"
-        subtitle="Deixe seus dados de demonstração atualizados."
+        subtitle="Mantenha seus dados de contato atualizados."
       />
       <Field
         label="Nome"
@@ -162,7 +139,7 @@ export function EditProfile({ navigation }) {
             onChangeText={change("vehicle")}
           />
           <Field
-            label="Placa de demonstração (opcional)"
+            label="Placa (opcional)"
             placeholder="ABC1D23"
             value={form.plate}
             onChangeText={change("plate")}
@@ -170,24 +147,31 @@ export function EditProfile({ navigation }) {
           />
         </>
       )}
-      <Button title="Salvar perfil" onPress={submit} icon="checkmark" />
+      <Button
+        title={busy ? "Salvando..." : "Salvar perfil"}
+        disabled={busy}
+        onPress={submit}
+        icon="checkmark"
+      />
     </Page>
   );
 }
 export function Notifications() {
   const { notifications, markRead } = useApp();
+  const { busy, run } = useAction("Notificações");
   return (
     <Page>
       <Heading
         title="Novidades do seu ciclo"
-        subtitle="Atualizações geradas pelas ações neste aparelho."
+        subtitle="Atualizações dos pedidos vinculados à sua conta."
       />
       {notifications.length ? (
         <>
           <Button
             title="Marcar todas como lidas"
             secondary
-            onPress={markRead}
+            disabled={busy}
+            onPress={() => run(markRead)}
           />
           {notifications.map((n) => (
             <Card key={n.id}>
@@ -213,7 +197,7 @@ export function Notifications() {
       ) : (
         <Empty
           title="Nenhuma novidade ainda"
-          body="Crie uma coleta ou atualize uma etapa para ver as notificações de exemplo."
+          body="As atualizações das suas coletas aparecerão aqui."
         />
       )}
     </Page>
@@ -269,10 +253,10 @@ export function Help() {
       <Card>
         <Text className="text-lg font-bold text-ink">Sobre esta versão</Text>
         <Text className="mt-3 text-sm leading-6 text-slate-500">
-          Este aplicativo contém somente frontend. Os pontos, pedidos e perfis
-          de exemplo são fictícios. Não há cobrança, coleta real, autenticação,
-          mapa, mensagens ou notificação push. Os dados ficam neste aparelho e
-          não são sincronizados com outras pessoas.
+          Os cadastros, pontos e coletas são salvos no banco de dados pela API.
+          Cada conta tem um perfil próprio. As etapas são atualizadas pelos
+          participantes; não há rastreamento GPS, cobrança ou notificação push
+          nesta versão.
         </Text>
       </Card>
       <Card>
@@ -280,10 +264,10 @@ export function Help() {
           Teste o ciclo completo
         </Text>
         <Text className="mt-3 text-sm leading-6 text-slate-500">
-          Entre pela demonstração. Crie um pedido como usuário. Em Perfil,
-          alterne para motorista e aceite a coleta. Registre a retirada e a
-          entrega. Alterne para ponto e confirme o recebimento. Volte ao perfil
-          de usuário para conferir o histórico.
+          Cadastre um ponto com uma conta de responsável. Com outra conta de
+          morador, solicite a coleta. Entre como motorista para aceitar, retirar
+          e entregar. O responsável pelo ponto confirma o recebimento. Para
+          trocar de conta, use Sair da conta e faça outro login.
         </Text>
       </Card>
     </Page>

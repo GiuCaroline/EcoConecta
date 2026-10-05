@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useApp } from "../context/AppContext";
-import { ROLES } from "../data/mock";
+import { ROLES } from "../data/catalog";
 import {
   Page,
   Heading,
@@ -15,7 +15,6 @@ import {
 } from "../components/UI";
 
 export function Welcome({ navigation }) {
-  const { demo } = useApp();
   return (
     <SafeAreaView className="flex-1 bg-forest">
       <View className="flex-1 justify-between p-6">
@@ -52,89 +51,109 @@ export function Welcome({ navigation }) {
             secondary
             onPress={() => navigation.navigate("Login")}
           />
-          <Pressable accessibilityRole="button" onPress={demo} className="p-4">
-            <Text className="text-center text-sm font-semibold text-white">
-              Explorar demonstração →
-            </Text>
-          </Pressable>
         </View>
       </View>
     </SafeAreaView>
   );
 }
-export function AuthForm({ navigation, register = false }) {
-  const { login } = useApp();
+export function AuthForm({ navigation, register: registration = false }) {
+  const { login, registerAccount } = useApp();
+  const [role, setRole] = useState("resident");
   const [form, setForm] = useState({
     name: "",
     email: "",
-    password: "",
     phone: "",
+    password: "",
   });
-  const [role, setRole] = useState("resident");
-  const [terms, setTerms] = useState(false);
   const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const pending = React.useRef(false);
   const change = (key) => (value) => setForm((s) => ({ ...s, [key]: value }));
-  function submit() {
+  async function submit() {
+    if (pending.current) return;
     const next = {};
-    if (register && form.name.trim().length < 2)
+    if (registration && form.name.trim().length < 2)
       next.name = "Informe seu nome.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
       next.email = "Informe um e-mail válido.";
-    if (form.password.length < 6)
-      next.password = "Use pelo menos 6 caracteres para testar o formulário.";
-    if (register && form.phone.replace(/\D/g, "").length < 10)
+    if (registration ? form.password.length < 8 : !form.password)
+      next.password = registration
+        ? "Use pelo menos 8 caracteres."
+        : "Informe sua senha.";
+    if (registration && form.phone && form.phone.replace(/\D/g, "").length < 10)
       next.phone = "Informe um telefone com DDD.";
-    if (register && !terms)
-      next.terms = "Confirme que compreendeu a demonstração.";
     setErrors(next);
     if (Object.keys(next).length) return;
-    const email = form.email.trim().toLowerCase();
-    login({
-      id: `local:${email}`,
-      name: register ? form.name.trim() : email.split("@")[0],
-      email,
-      phone: form.phone.trim(),
-      address: "",
-      role,
-    });
+    pending.current = true;
+    setBusy(true);
+    try {
+      const email = form.email.trim().toLowerCase();
+      if (registration)
+        await registerAccount({
+          name: form.name.trim(),
+          email,
+          password: form.password,
+          phone: form.phone.trim(),
+          role,
+        });
+      else await login(email, form.password);
+    } catch (error) {
+      if (error.fields)
+        setErrors(
+          Object.fromEntries(
+            error.fields.map((field) => [field.path, field.message]),
+          ),
+        );
+      Feedback.alert(
+        registration ? "Não foi possível cadastrar" : "Não foi possível entrar",
+        error.message,
+      );
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
   }
   return (
     <Page>
       <Heading
         eyebrow="BEM-VINDO AO ECOCONECTA"
-        title={register ? "Faça parte do ciclo" : "Que bom ter você aqui"}
+        title={registration ? "Faça parte do ciclo" : "Que bom ter você aqui"}
         subtitle={
-          register
+          registration
             ? "Escolha como deseja participar."
-            : "Entre para explorar o protótipo."
+            : "Entre com o e-mail e a senha da sua conta."
         }
       />
-      <Card>
-        <Text className="text-sm leading-5 text-slate-500">
-          Modo demonstrativo: qualquer e-mail válido e senha com 6 caracteres
-          permitem entrar. A senha não é salva e não há autenticação real.
-        </Text>
-      </Card>
-      <View className="mb-4 flex-row flex-wrap">
-        {ROLES.map((r) => (
-          <Chip
-            key={r.id}
-            label={r.name}
-            selected={role === r.id}
-            onPress={() => setRole(r.id)}
-            icon={r.icon}
+      {registration && (
+        <>
+          <Card>
+            <Text className="text-sm leading-5 text-slate-500">
+              O perfil escolhido será vinculado à sua conta. Para participar com
+              outro perfil, cadastre outra conta.
+            </Text>
+          </Card>
+          <View className="mb-4 flex-row flex-wrap">
+            {ROLES.map((r) => (
+              <Chip
+                key={r.id}
+                label={r.name}
+                selected={role === r.id}
+                onPress={() => !busy && setRole(r.id)}
+                icon={r.icon}
+              />
+            ))}
+          </View>
+          <Field
+            label="Nome completo"
+            placeholder="Como você se chama?"
+            value={form.name}
+            onChangeText={change("name")}
+            error={errors.name}
+            autoComplete="name"
+            editable={!busy}
+            maxLength={120}
           />
-        ))}
-      </View>
-      {register && (
-        <Field
-          label="Nome completo"
-          placeholder="Como você se chama?"
-          value={form.name}
-          onChangeText={change("name")}
-          error={errors.name}
-          autoComplete="name"
-        />
+        </>
       )}
       <Field
         label="E-mail"
@@ -145,66 +164,46 @@ export function AuthForm({ navigation, register = false }) {
         keyboardType="email-address"
         autoCapitalize="none"
         autoComplete="email"
+        editable={!busy}
+        maxLength={254}
       />
-      {register && (
+      {registration && (
         <Field
-          label="Telefone"
+          label="Telefone (opcional)"
           placeholder="(11) 99999-9999"
           value={form.phone}
           onChangeText={change("phone")}
           error={errors.phone}
           keyboardType="phone-pad"
+          editable={!busy}
+          maxLength={30}
         />
       )}
       <Field
-        label="Senha de demonstração"
-        placeholder="Pelo menos 6 caracteres"
+        label="Senha"
+        placeholder={registration ? "Pelo menos 8 caracteres" : "Sua senha"}
         value={form.password}
         onChangeText={change("password")}
         error={errors.password}
         secureTextEntry
         autoCapitalize="none"
+        autoComplete={registration ? "new-password" : "current-password"}
+        editable={!busy}
+        maxLength={72}
       />
-      {register ? (
-        <View className="mb-5">
-          <Pressable
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: terms }}
-            onPress={() => setTerms((v) => !v)}
-            className="flex-row items-center gap-3"
-          >
-            <Icon name={terms ? "checkbox" : "square-outline"} />
-            <Text className="flex-1 text-sm leading-5 text-slate-500">
-              Entendo que este é um protótipo e usarei dados fictícios.
-            </Text>
-          </Pressable>
-          {errors.terms && (
-            <Text className="mt-2 text-sm text-red-600">{errors.terms}</Text>
-          )}
-        </View>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() =>
-            Feedback.alert(
-              "Recuperação de senha",
-              "Neste front não há conta autenticada. Use qualquer senha de 6 caracteres. A recuperação real dependerá do backend.",
-            )
-          }
-          className="mb-5 self-end"
-        >
-          <Text className="font-semibold text-forest">Esqueci minha senha</Text>
-        </Pressable>
-      )}
       <Button
-        title={register ? "Criar perfil de teste" : "Entrar"}
+        title={
+          busy ? "Aguarde..." : registration ? "Criar minha conta" : "Entrar"
+        }
         onPress={submit}
+        disabled={busy}
         icon="arrow-forward"
       />
       <Button
-        title={register ? "Já tenho uma conta" : "Criar meu perfil"}
+        title={registration ? "Já tenho uma conta" : "Criar minha conta"}
         secondary
-        onPress={() => navigation.replace(register ? "Login" : "Register")}
+        disabled={busy}
+        onPress={() => navigation.replace(registration ? "Login" : "Register")}
       />
     </Page>
   );

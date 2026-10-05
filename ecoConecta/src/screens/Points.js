@@ -1,8 +1,9 @@
 import { Feedback } from "../utils/feedback";
-import React, { useEffect, useState } from "react";
+import { useAction } from "../hooks/useAction";
+import React, { useState } from "react";
 import { View, Text, Switch } from "react-native";
 import { useApp } from "../context/AppContext";
-import { MATERIALS } from "../data/mock";
+import { MATERIALS } from "../data/catalog";
 import { materialNames } from "../utils/domain";
 import {
   Page,
@@ -22,11 +23,17 @@ import {
 export function Points({ navigation, route }) {
   const { points, favorites } = useApp();
   const [search, setSearch] = useState("");
-  const [material, setMaterial] = useState("all");
+  const routeMaterial = route.params?.material;
+  const [materialSelection, setMaterialSelection] = useState({
+    routeMaterial,
+    value: routeMaterial || "all",
+  });
+  const material =
+    materialSelection.routeMaterial === routeMaterial
+      ? materialSelection.value
+      : routeMaterial || "all";
+  const setMaterial = (value) => setMaterialSelection({ routeMaterial, value });
   const [onlyFavorites, setOnlyFavorites] = useState(false);
-  useEffect(() => {
-    if (route.params?.material) setMaterial(route.params.material);
-  }, [route.params?.material]);
   const normalized = search.trim().toLocaleLowerCase("pt-BR");
   const filtered = points.filter(
     (p) =>
@@ -79,8 +86,8 @@ export function Points({ navigation, route }) {
       </View>
       <Card>
         <Text className="text-xs leading-5 text-slate-500">
-          Os pontos iniciais são fictícios. A busca funciona por nome, endereço
-          e material; não usa GPS.
+          A busca mostra os pontos cadastrados por nome, endereço e material;
+          não usa GPS.
         </Text>
       </Card>
       {filtered.length ? (
@@ -179,6 +186,7 @@ export function PointDetail({ navigation, route }) {
 }
 export function PointForm({ route, navigation }) {
   const { points, savePoint, ownedPoints } = useApp();
+  const { busy, run } = useAction("Não foi possível salvar o ponto");
   const id = route.params?.id;
   const existing = points.find((p) => p.id === id);
   const [form, setForm] = useState(
@@ -214,15 +222,17 @@ export function PointForm({ route, navigation }) {
       next.materials = "Selecione pelo menos um material.";
     setErrors(next);
     if (Object.keys(next).length) return;
-    savePoint(
-      { ...form, name: form.name.trim(), address: form.address.trim() },
-      id,
-    );
-    Feedback.alert(
-      id ? "Ponto atualizado" : "Ponto cadastrado",
-      "As informações já estão disponíveis na busca.",
-    );
-    navigation.goBack();
+    run(async () => {
+      await savePoint(
+        { ...form, name: form.name.trim(), address: form.address.trim() },
+        id,
+      );
+      navigation.goBack();
+      Feedback.alert(
+        id ? "Ponto atualizado" : "Ponto cadastrado",
+        "As informações já estão disponíveis na busca.",
+      );
+    });
   }
   return (
     <Page>
@@ -291,7 +301,10 @@ export function PointForm({ route, navigation }) {
         </View>
       </Card>
       <Button
-        title={id ? "Salvar alterações" : "Cadastrar ponto"}
+        title={
+          busy ? "Salvando..." : id ? "Salvar alterações" : "Cadastrar ponto"
+        }
+        disabled={busy}
         icon="checkmark-circle-outline"
         onPress={submit}
       />

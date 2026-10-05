@@ -1,8 +1,9 @@
 import { Feedback } from "../utils/feedback";
+import { useAction } from "../hooks/useAction";
 import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useApp } from "../context/AppContext";
-import { MATERIALS, STEPS } from "../data/mock";
+import { MATERIALS, STEPS } from "../data/catalog";
 import {
   acceptsMaterials,
   canAdvance,
@@ -27,6 +28,7 @@ import {
 
 export function NewRequest({ navigation, route }) {
   const { user, points, addRequest } = useApp();
+  const { busy, run } = useAction("Não foi possível agendar");
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({
     materials: [],
@@ -72,12 +74,14 @@ export function NewRequest({ navigation, route }) {
       );
       return;
     }
-    const id = addRequest({
-      ...form,
-      quantity: parseQuantity(form.quantity),
-      address: form.address.trim(),
+    run(async () => {
+      const id = await addRequest({
+        ...form,
+        quantity: parseQuantity(form.quantity),
+        address: form.address.trim(),
+      });
+      navigation.replace("RequestDetail", { id });
     });
-    navigation.replace("RequestDetail", { id });
   }
   return (
     <Page>
@@ -201,8 +205,8 @@ export function NewRequest({ navigation, route }) {
           />
           <Card>
             <Text className="text-sm leading-5 text-slate-500">
-              A data é uma preferência. Neste protótipo não há confirmação real
-              de disponibilidade do motorista.
+              A data é uma preferência de retirada. Aguarde um motorista aceitar
+              sua solicitação.
             </Text>
           </Card>
         </>
@@ -239,21 +243,24 @@ export function NewRequest({ navigation, route }) {
               Um material, muitas possibilidades.
             </Text>
             <Text className="mt-2 text-sm leading-5 text-slate-500">
-              Separe os recicláveis e deixe-os prontos para a retirada. Este
-              pedido será apenas uma simulação local.
+              Separe os recicláveis e deixe-os prontos para a retirada. Seu
+              pedido será salvo e disponibilizado aos motoristas parceiros.
             </Text>
           </Card>
         </>
       )}
       <Button
-        title={step < 2 ? "Continuar" : "Confirmar coleta"}
+        title={
+          busy ? "Salvando..." : step < 2 ? "Continuar" : "Confirmar coleta"
+        }
         onPress={step < 2 ? next : submit}
-        disabled={step === 0 && !eligible.length}
+        disabled={busy || (step === 0 && !eligible.length)}
         icon={step === 2 ? "checkmark-circle-outline" : "arrow-forward"}
       />
       {step > 0 && (
         <Button
           title="Voltar etapa"
+          disabled={busy}
           secondary
           onPress={() => {
             setErrors({});
@@ -339,6 +346,7 @@ export function RequestDetail({ navigation, route }) {
     advanceRequest,
     cancelRequest,
   } = useApp();
+  const { busy, run } = useAction("Coleta");
   const request = requests.find((r) => r.id === route.params.id);
   if (!request)
     return (
@@ -362,7 +370,7 @@ export function RequestDetail({ navigation, route }) {
         {
           text: "Cancelar coleta",
           style: "destructive",
-          onPress: () => cancelRequest(request.id),
+          onPress: () => run(() => cancelRequest(request.id)),
         },
       ],
     );
@@ -381,8 +389,8 @@ export function RequestDetail({ navigation, route }) {
       />
       <Card>
         <Text className="text-xs leading-5 text-slate-500">
-          Acompanhamento simulado. Os perfis atualizam as etapas manualmente;
-          não há mapa ou rastreamento GPS.
+          Os participantes registram as etapas da coleta; não há mapa ou
+          rastreamento GPS.
         </Text>
       </Card>
       {!request.cancelled && (
@@ -435,7 +443,11 @@ export function RequestDetail({ navigation, route }) {
           icon="business-outline"
           title="Destino"
           body={
-            point ? `${point.name}\n${point.address}` : "Ponto indisponível"
+            request.pointName
+              ? `${request.pointName}\n${request.pointAddress}`
+              : point
+                ? `${point.name}\n${point.address}`
+                : "Ponto indisponível"
           }
         />
         <Row
@@ -459,24 +471,25 @@ export function RequestDetail({ navigation, route }) {
       {user.role === "driver" && request.status === 0 && !request.cancelled && (
         <Button
           title="Aceitar esta coleta"
-          disabled={user.online === false}
+          disabled={busy || user.online === false}
           icon="checkmark-circle-outline"
-          onPress={() => acceptRequest(request.id)}
+          onPress={() => run(() => acceptRequest(request.id))}
         />
       )}
       {allowed && (
         <Button
           title={nextLabel}
+          disabled={busy}
           icon="checkmark-circle-outline"
           onPress={() =>
             Feedback.alert(
               nextLabel,
-              "Confirme para atualizar a etapa no protótipo.",
+              "Confirme para registrar esta etapa da coleta.",
               [
                 { text: "Voltar", style: "cancel" },
                 {
                   text: "Confirmar",
-                  onPress: () => advanceRequest(request.id),
+                  onPress: () => run(() => advanceRequest(request.id)),
                 },
               ],
             )
@@ -495,7 +508,12 @@ export function RequestDetail({ navigation, route }) {
         !request.cancelled &&
         request.residentId === user.id &&
         user.role === "resident" && (
-          <Button title="Cancelar coleta" secondary onPress={confirmCancel} />
+          <Button
+            title="Cancelar coleta"
+            disabled={busy}
+            secondary
+            onPress={confirmCancel}
+          />
         )}
       {request.status === 4 && !request.cancelled && (
         <Card>
@@ -504,8 +522,8 @@ export function RequestDetail({ navigation, route }) {
             Seu material ganhou um novo destino 💚
           </Text>
           <Text className="mt-2 text-sm leading-5 text-slate-500">
-            Peso informado: {request.quantity} kg estimados. O protótipo não
-            calcula impacto ambiental certificado.
+            Peso informado: {request.quantity} kg estimados. Esse peso não
+            representa um cálculo certificado de impacto ambiental.
           </Text>
         </Card>
       )}

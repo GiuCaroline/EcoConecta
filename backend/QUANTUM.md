@@ -71,9 +71,9 @@ npm ci
 npx expo start --clear
 ```
 
-Abra Explorar demonstração → Perfil → Sou motorista → Início → Sugestão quântica de coletas. O modo Exemplo do grupo usa 5 kg e 20 kg. Com referência de 20 kg, esses pesos viram exatamente π/4 e π. Se alterar QUANTUM_REFERENCE_KG, o exemplo por pesos terá outros ângulos; `python -m quantum_service.demo` mantém os ângulos originais.
+Entre com uma conta cadastrada como motorista → Minha rota → Sugestão quântica de coletas → Exemplo do grupo. O modo Exemplo do grupo usa 5 kg e 20 kg. Com referência de 20 kg, esses pesos viram exatamente π/4 e π. Se alterar QUANTUM_REFERENCE_KG, o exemplo por pesos terá outros ângulos; `python -m quantum_service.demo` mantém os ângulos originais.
 
-O frontend ainda usa dados locais para cadastro e coletas. Ao comparar pedidos locais, a tela identifica o modo demonstrativo. Para comparar pedidos reais, conecte AppContext à API conforme INTEGRACAO-EXPO.md e salve a sessão em expo-secure-store na chave `ecoconecta.session`. O endpoint protegido requer dois UUIDs reais e perfil driver; o servidor lê os pesos do banco. A demonstração pública funciona sem essa integração.
+O frontend atualizado está conectado à API. O modo Comparar duas coletas envia dois UUIDs ao endpoint protegido; o servidor valida o perfil de motorista, os pedidos e lê os pesos do banco. A sessão mobile é guardada em expo-secure-store na chave `ecoconecta.session`. O modo Exemplo do grupo continua separado e identificado como exemplo educacional, sem criar pedidos. Veja INTEGRACAO-EXPO.md.
 
 ## API e regras
 

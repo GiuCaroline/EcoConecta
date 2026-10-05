@@ -1,4 +1,13 @@
-import React from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+} from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { HeaderHeightContext } from "@react-navigation/elements";
+import { useAction } from "../hooks/useAction";
 import {
   View,
   Text,
@@ -7,10 +16,12 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
+  RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { MATERIALS, STEPS } from "../data/mock";
+import { MATERIALS, STEPS } from "../data/catalog";
 import { materialNames } from "../utils/domain";
 import { useApp } from "../context/AppContext";
 import { cssInterop } from "nativewind";
@@ -21,27 +32,135 @@ cssInterop(SafeAreaView, { className: "style" });
 export const Icon = ({ name, size = 22, color = "#166534" }) => (
   <Ionicons name={name} size={size} color={color} />
 );
+const InputScrollContext = createContext(null);
 export function Page({ children, scroll = true }) {
+  const { user, refresh, refreshing, syncError } = useApp();
+  const headerHeight = useContext(HeaderHeightContext) || 0;
+  const scrollRef = useRef(null);
+  const focused = useRef(null);
+  const scrollY = useRef(0);
+  const keyboardTop = useRef(Infinity);
+  const keepVisible = useCallback(() => {
+    if (Platform.OS === "web" || !focused.current || !scrollRef.current) return;
+    const input = focused.current;
+    requestAnimationFrame(() => {
+      input.measureInWindow?.((x, y, width, height) => {
+        scrollRef.current?.measureInWindow((sx, sy, sw, sh) => {
+          if (focused.current !== input) return;
+          const bottom = Math.min(sy + sh, keyboardTop.current) - 24;
+          if (y + height > bottom)
+            scrollRef.current?.scrollTo({
+              y: Math.max(0, scrollY.current + y + height - bottom),
+              animated: true,
+            });
+        });
+      });
+    });
+  }, []);
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const show = Keyboard.addListener("keyboardDidShow", (event) => {
+      keyboardTop.current = event.endCoordinates.screenY;
+      keepVisible();
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      keyboardTop.current = Infinity;
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [keepVisible]);
+  const userId = user?.id;
+  useFocusEffect(
+    useCallback(() => {
+      if (userId) refresh().catch(() => {});
+    }, [userId, refresh]),
+  );
+  const content = (
+    <>
+      {user && (
+        <View className="mb-4">
+          {syncError ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              className="mb-2 text-sm text-red-600"
+            >
+              {syncError}
+            </Text>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            disabled={refreshing}
+            onPress={() => refresh().catch(() => {})}
+            className="self-end py-2"
+          >
+            <Text className="text-sm font-semibold text-forest">
+              {refreshing ? "Atualizando..." : "Atualizar dados"}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+      {children}
+    </>
+  );
   return (
     <SafeAreaView
       className="flex-1 bg-sand"
       edges={["left", "right", "bottom"]}
     >
       <KeyboardAvoidingView
-        className="flex-1"
+        style={{ flex: 1 }}
+        enabled={Platform.OS !== "web"}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={headerHeight}
       >
-        {scroll ? (
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-          >
-            {children}
-          </ScrollView>
-        ) : (
-          children
-        )}
+        <InputScrollContext.Provider
+          value={{
+            focus: (input) => {
+              focused.current = input;
+              keepVisible();
+            },
+            blur: (input) => {
+              if (focused.current === input) focused.current = null;
+            },
+          }}
+        >
+          {scroll ? (
+            <ScrollView
+              ref={scrollRef}
+              style={{ flex: 1 }}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={
+                Platform.OS === "ios" ? "interactive" : "on-drag"
+              }
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{
+                flexGrow: 1,
+                padding: 20,
+                paddingBottom: 80,
+              }}
+              onLayout={keepVisible}
+              onScroll={(event) => {
+                scrollY.current = event.nativeEvent.contentOffset.y;
+              }}
+              scrollEventThrottle={16}
+              refreshControl={
+                user ? (
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={() => refresh().catch(() => {})}
+                    tintColor="#166534"
+                  />
+                ) : undefined
+              }
+            >
+              {content}
+            </ScrollView>
+          ) : (
+            content
+          )}
+        </InputScrollContext.Provider>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -103,16 +222,27 @@ export function Button({
   );
 }
 export function Field({ label, error, multiline, ...props }) {
+  const input = useRef(null);
+  const scrolling = useContext(InputScrollContext);
   return (
     <View className="mb-4">
       <Text className="mb-2 text-sm font-semibold text-ink">{label}</Text>
       <TextInput
+        ref={input}
         accessibilityLabel={label}
         placeholderTextColor="#94a3b8"
         multiline={multiline}
         textAlignVertical={multiline ? "top" : "center"}
         className={`rounded-2xl border bg-white px-4 py-3 text-base text-ink ${error ? "border-red-400" : "border-slate-200"} ${multiline ? "min-h-[100px]" : "min-h-[52px]"}`}
         {...props}
+        onFocus={(event) => {
+          scrolling?.focus(input.current);
+          props.onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          scrolling?.blur(input.current);
+          props.onBlur?.(event);
+        }}
       />
       {error && (
         <Text
@@ -207,6 +337,7 @@ export function Row({ icon, title, body }) {
 }
 export function PointCard({ point, onPress }) {
   const { favorites, favorite } = useApp();
+  const { busy, run } = useAction("Favoritos");
   return (
     <Card>
       <View className="flex-row items-start gap-3">
@@ -225,7 +356,8 @@ export function PointCard({ point, onPress }) {
           </View>
         </Pressable>
         <Pressable
-          onPress={() => favorite(point.id)}
+          disabled={busy}
+          onPress={() => run(() => favorite(point.id))}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel={
@@ -280,7 +412,7 @@ export function RequestCard({ request, onPress }) {
         <View className="mt-3 flex-row items-center gap-2">
           <Icon name="location-outline" size={18} />
           <Text className="flex-1 text-sm font-semibold text-forest">
-            {point?.name || "Ponto indisponível"}
+            {request.pointName || point?.name || "Ponto indisponível"}
           </Text>
           <Icon name="chevron-forward" size={18} />
         </View>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useApp } from "../context/AppContext";
 import {
@@ -11,7 +11,7 @@ import {
   Empty,
   Badge,
 } from "../components/UI";
-import { getQuantumSessionToken, requestQuantum } from "../services/quantumApi";
+import { requestQuantum } from "../services/quantumApi";
 
 const STATE_LABELS = {
   "00": "Nenhum dos dois",
@@ -29,30 +29,18 @@ export function Quantum({ navigation }) {
       !r.cancelled &&
       (r.status === 0 || (r.status === 1 && r.driverId === user.id)),
   );
-  const [mode, setMode] = useState("example");
+  const [mode, setMode] = useState("requests");
   const [selected, setSelected] = useState(
     candidates.slice(0, 2).map((r) => r.id),
   );
-  const [token, setToken] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
-  useEffect(() => {
-    let active = true;
-    getQuantumSessionToken()
-      .then((value) => {
-        if (active) setToken(value);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
   const chosen = selected
     .map((id) => candidates.find((r) => r.id === id))
     .filter(Boolean);
   const connected = Boolean(
-    token && chosen.length === 2 && chosen.every((r) => UUID.test(r.id)),
+    chosen.length === 2 && chosen.every((r) => UUID.test(r.id)),
   );
 
   function chooseMode(value) {
@@ -82,12 +70,7 @@ export function Quantum({ navigation }) {
       const example = mode === "example";
       const inputs = example
         ? { volumeA: 5, volumeB: 20 }
-        : connected
-          ? { token, requestIds: chosen.map((r) => r.id) }
-          : {
-              volumeA: Number(chosen[0].quantity),
-              volumeB: Number(chosen[1].quantity),
-            };
+        : { requestIds: chosen.map((r) => r.id) };
       const response = await requestQuantum(inputs);
       setResult({
         ...response,
@@ -158,19 +141,11 @@ export function Quantum({ navigation }) {
       ) : (
         <>
           <Card>
-            <Badge
-              text={
-                connected
-                  ? "Dados do servidor"
-                  : "Demonstração com dados locais"
-              }
-            />
+            <Badge text={"Dados do servidor"} />
             <Text className="mt-3 text-sm leading-6 text-slate-500">
               Selecione exatamente duas coletas. A primeira selecionada será A e
               a segunda será B. O terceiro toque troca B.{" "}
-              {connected
-                ? "O backend verifica os pedidos e lê os pesos do banco."
-                : "Neste protótipo, os pesos locais são enviados à simulação. A integração com a API permite comparar pedidos reais."}
+              {"O backend verifica os pedidos e lê os pesos do banco."}
             </Text>
           </Card>
           {candidates.length < 2 ? (
@@ -212,7 +187,7 @@ export function Quantum({ navigation }) {
       <Button
         title={busy ? "Executando circuito..." : "Executar circuito PennyLane"}
         icon="hardware-chip-outline"
-        disabled={busy || (mode === "requests" && chosen.length !== 2)}
+        disabled={busy || (mode === "requests" && !connected)}
         onPress={simulate}
       />
       {error ? (

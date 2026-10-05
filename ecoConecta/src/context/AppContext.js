@@ -1,237 +1,262 @@
-import { Feedback } from "../utils/feedback";
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useRef,
   useState,
 } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { DEMO_USER, INITIAL_POINTS, INITIAL_REQUESTS } from "../data/mock";
-import { acceptsMaterials, canAdvance } from "../utils/domain";
-
+import { AppState } from "react-native";
+import { api } from "../services/api";
 const AppContext = createContext(null);
-const KEY = "@ecoconecta/frontend/v1";
-const defaults = () => ({
+const empty = () => ({
   user: null,
-  points: INITIAL_POINTS,
-  requests: INITIAL_REQUESTS,
+  points: [],
+  requests: [],
   favorites: [],
   notifications: [],
 });
-
 export function AppProvider({ children }) {
-  const [state, setState] = useState(defaults);
+  const [state, setState] = useState(empty);
+  const current = useRef(state);
   const [ready, setReady] = useState(false);
-  const [storageError, setStorageError] = useState(false);
-  const saveQueue = useRef(Promise.resolve());
-  useEffect(() => {
-    let alive = true;
-    AsyncStorage.getItem(KEY)
-      .then((raw) => {
-        if (!raw || !alive) return;
-        const data = JSON.parse(raw);
-        if (
-          !Array.isArray(data.points) ||
-          !Array.isArray(data.requests) ||
-          !Array.isArray(data.favorites) ||
-          !Array.isArray(data.notifications)
-        )
-          throw new Error("Dados inválidos");
-        setState(data);
-      })
-      .catch(() => {
-        if (alive)
-          Feedback.alert(
-            "Dados locais",
-            "Não foi possível carregar os dados. O app abriu com os exemplos iniciais.",
-          );
-      })
-      .finally(() => {
-        if (alive) setReady(true);
-      });
-    return () => {
-      alive = false;
-    };
+  const [bootError, setBootError] = useState("");
+  const [syncError, setSyncError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const generation = useRef(0);
+  const revision = useRef(0);
+  const inFlight = useRef(null);
+  const locks = useRef(new Set());
+  const alive = useRef(true);
+  const publish = useCallback((value) => {
+    current.current =
+      typeof value === "function" ? value(current.current) : value;
+    if (alive.current) setState(current.current);
   }, []);
-  useEffect(() => {
-    if (!ready) return;
-    const snapshot = JSON.stringify(state);
-    saveQueue.current = saveQueue.current
-      .catch(() => {})
-      .then(() => AsyncStorage.setItem(KEY, snapshot))
-      .then(() => setStorageError(false))
-      .catch(() => setStorageError(true));
-  }, [state, ready]);
-
-  function notify(current, title, body) {
-    return [
-      { id: `${Date.now()}-${Math.random()}`, title, body, read: false },
-      ...current,
-    ].slice(0, 50);
-  }
-  function login(profile) {
-    setState((s) => ({ ...s, user: profile }));
-  }
-  function demo() {
-    login({ ...DEMO_USER });
-  }
-  function logout() {
-    setState((s) => ({ ...s, user: null }));
-  }
-  function updateUser(values) {
-    setState((s) => ({ ...s, user: { ...s.user, ...values } }));
-  }
-  function favorite(id) {
-    setState((s) => ({
-      ...s,
-      favorites: s.favorites.includes(id)
-        ? s.favorites.filter((item) => item !== id)
-        : [...s.favorites, id],
-    }));
-  }
-  function addRequest(values) {
-    const id = `EC-${Date.now()}`;
-    setState((s) => {
-      const point = s.points.find((p) => p.id === values.pointId);
-      if (!s.user || !point || !acceptsMaterials(point, values.materials))
-        return s;
-      return {
-        ...s,
-        requests: [
-          {
-            ...values,
-            id,
-            residentId: s.user.id,
-            residentName: s.user.name,
-            status: 0,
-            driverId: null,
-            driverName: null,
-            createdAt: new Date().toISOString(),
-          },
-          ...s.requests,
-        ],
-        notifications: notify(
-          s.notifications,
-          "Coleta solicitada!",
-          "Seu pedido está disponível para um motorista parceiro.",
-        ),
-      };
-    });
-    return id;
-  }
-  function cancelRequest(id) {
-    setState((s) => ({
-      ...s,
-      requests: s.requests.map((r) =>
-        r.id === id && r.residentId === s.user?.id && r.status === 0
-          ? { ...r, cancelled: true }
-          : r,
-      ),
-    }));
-  }
-  function acceptRequest(id) {
-    setState((s) => {
-      const request = s.requests.find((r) => r.id === id);
-      if (
-        s.user?.role !== "driver" ||
-        s.user.online === false ||
-        !request ||
-        request.status !== 0 ||
-        request.cancelled
-      )
-        return s;
-      return {
-        ...s,
-        requests: s.requests.map((r) =>
-          r.id === id && r.status === 0 && !r.cancelled
-            ? { ...r, status: 1, driverId: s.user.id, driverName: s.user.name }
-            : r,
-        ),
-        notifications: notify(
-          s.notifications,
-          "Motorista atribuído",
-          "Uma coleta recebeu um motorista parceiro.",
-        ),
-      };
-    });
-  }
-  function advanceRequest(id) {
-    setState((s) => {
-      const request = s.requests.find((r) => r.id === id);
-      const owned = s.points
-        .filter(
-          (p) =>
-            p.owner === s.user?.id ||
-            (s.user?.id === "demo" && p.owner === "demo-point"),
+  const expire = useCallback(() => {
+    generation.current++;
+    revision.current++;
+    inFlight.current = null;
+    publish(empty());
+    setSyncError("");
+    setBootError("");
+  }, [publish]);
+  const refresh = useCallback(async () => {
+    if (inFlight.current) return inFlight.current;
+    const session = generation.current,
+      version = revision.current;
+    setRefreshing(true);
+    const pending = (async () => {
+      try {
+        const data = await api.loadAppData();
+        if (
+          alive.current &&
+          session === generation.current &&
+          version === revision.current
+        ) {
+          publish(data);
+          setSyncError("");
+        }
+        return data;
+      } catch (error) {
+        if (
+          alive.current &&
+          session === generation.current &&
+          error.status !== 401
         )
-        .map((p) => p.id);
-      if (!request || !canAdvance(request, s.user?.role, s.user?.id, owned))
-        return s;
-      return {
-        ...s,
-        requests: s.requests.map((r) =>
-          r.id === id ? { ...r, status: r.status + 1 } : r,
-        ),
-        notifications: notify(
-          s.notifications,
-          "Coleta atualizada",
-          request.status === 3
-            ? "Recebimento confirmado. Material com novo destino!"
-            : "O pedido avançou para a próxima etapa.",
-        ),
-      };
+          setSyncError(error.message);
+        throw error;
+      } finally {
+        if (inFlight.current === pending) {
+          inFlight.current = null;
+          if (alive.current) setRefreshing(false);
+        }
+      }
+    })();
+    inFlight.current = pending;
+    return pending;
+  }, [publish]);
+  const initialize = useCallback(async () => {
+    try {
+      if (await api.getSessionToken()) await refresh();
+    } catch (error) {
+      if (error.status !== 401 && alive.current) setBootError(error.message);
+    } finally {
+      if (alive.current) setReady(true);
+    }
+  }, [refresh]);
+  useEffect(() => {
+    alive.current = true;
+    api.setSessionExpiredHandler(expire);
+    initialize();
+    return () => {
+      alive.current = false;
+      api.setSessionExpiredHandler(() => {});
+    };
+  }, [expire, initialize]);
+  const userId = state.user?.id;
+  useEffect(() => {
+    if (!userId) return;
+    const sync = () => {
+      if (AppState.currentState === "active" || AppState.currentState == null)
+        refresh().catch(() => {});
+    };
+    const timer = setInterval(sync, 20000);
+    const subscription = AppState.addEventListener("change", (value) => {
+      if (value === "active") sync();
     });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [userId, refresh]);
+  async function authenticate(action) {
+    generation.current++;
+    revision.current++;
+    inFlight.current = null;
+    const session = generation.current;
+    publish(empty());
+    setSyncError("");
+    const user = await action();
+    if (session !== generation.current) return;
+    // O login já foi confirmado. Uma falha ao carregar listas não cria uma conta fictícia.
+    publish({ ...empty(), user });
+    await refresh().catch(() => {});
   }
-  function savePoint(values, id) {
-    const pointId = id || `P-${Date.now()}`;
-    setState((s) => {
-      if (s.user?.role !== "point") return s;
-      const existing = s.points.find((p) => p.id === id);
-      if (
-        existing &&
-        existing.owner !== s.user.id &&
-        !(s.user.id === "demo" && existing.owner === "demo-point")
-      )
-        return s;
-      const point = {
-        ...values,
-        id: pointId,
-        owner: existing?.owner || s.user.id,
-        icon: "business-outline",
-      };
-      return {
+  const login = (email, password) =>
+    authenticate(() => api.login(email, password));
+  const registerAccount = (input) => authenticate(() => api.register(input));
+  async function logout() {
+    await api.logout();
+    expire();
+  }
+  async function mutate(key, action, apply) {
+    if (!current.current.user) throw new Error("Entre na sua conta.");
+    if (locks.current.has(key))
+      throw new Error("Esta operação já está em andamento.");
+    locks.current.add(key);
+    const session = generation.current;
+    inFlight.current = null;
+    revision.current++; // Descarta qualquer leitura que começou antes desta gravação.
+    try {
+      const result = await action();
+      if (session !== generation.current) return result;
+      revision.current++;
+      inFlight.current = null;
+      publish((s) => apply(s, result));
+      refresh().catch(() => {});
+      return result;
+    } catch (error) {
+      if (session === generation.current && [404, 409].includes(error.status))
+        refresh().catch(() => {});
+      throw error;
+    } finally {
+      locks.current.delete(key);
+    }
+  }
+  const storeRequest = (s, r) => ({
+    ...s,
+    requests: [r, ...s.requests.filter((item) => item.id !== r.id)],
+  });
+  async function updateUser(values) {
+    const user = current.current.user;
+    const allowed = [
+      "name",
+      "phone",
+      "address",
+      ...(user?.role === "driver" ? ["vehicle", "plate", "online"] : []),
+    ];
+    if (Object.keys(values).some((key) => !allowed.includes(key)))
+      throw new Error("O perfil da conta não pode ser alterado nesta sessão.");
+    return mutate(
+      "profile",
+      () => api.updateUser(values),
+      (s, saved) => ({ ...s, user: saved }),
+    );
+  }
+  async function favorite(id) {
+    const active = !current.current.favorites.includes(id);
+    return mutate(
+      `favorite-${id}`,
+      () => api.setFavorite(id, active),
+      (s) => ({
         ...s,
-        points: id
-          ? s.points.map((p) => (p.id === id ? point : p))
-          : [point, ...s.points],
-      };
-    });
-    return pointId;
+        favorites: active
+          ? [...new Set([...s.favorites, id])]
+          : s.favorites.filter((item) => item !== id),
+      }),
+    );
   }
-  function markRead() {
-    setState((s) => ({
+  async function addRequest(values) {
+    const saved = await mutate(
+      "create-request",
+      () => api.createRequest(values),
+      storeRequest,
+    );
+    return saved.id;
+  }
+  const cancelRequest = (id) =>
+    mutate(`request-${id}`, () => api.cancelRequest(id), storeRequest);
+  const acceptRequest = (id) =>
+    mutate(`request-${id}`, () => api.acceptRequest(id), storeRequest);
+  async function advanceRequest(id) {
+    const { user, requests } = current.current;
+    const request = requests.find((r) => r.id === id);
+    let action;
+    if (user.role === "driver" && request?.status === 1)
+      action = api.pickupRequest;
+    else if (user.role === "driver" && request?.status === 2)
+      action = api.deliverRequest;
+    else if (user.role === "point" && request?.status === 3)
+      action = api.receiveRequest;
+    else throw new Error("Esta etapa não está disponível. Atualize os dados.");
+    return mutate(`request-${id}`, () => action(id), storeRequest);
+  }
+  async function savePoint(values, id) {
+    const input = Object.fromEntries(
+      [
+        "name",
+        "address",
+        "phone",
+        "hours",
+        "description",
+        "materials",
+        "active",
+      ].map((key) => [key, values[key]]),
+    );
+    const saved = await mutate(
+      `point-${id || "new"}`,
+      () => api.savePoint(input, id),
+      (s, p) => ({
+        ...s,
+        points: [p, ...s.points.filter((item) => item.id !== p.id)],
+      }),
+    );
+    return saved.id;
+  }
+  const markRead = () =>
+    mutate("notifications", api.markNotificationsRead, (s) => ({
       ...s,
       notifications: s.notifications.map((n) => ({ ...n, read: true })),
     }));
-  }
-  function reset() {
-    setState({ ...defaults(), user: { ...DEMO_USER } });
-  }
-  const ownedPoints = state.points.filter(
-    (p) =>
-      p.owner === state.user?.id ||
-      (state.user?.id === "demo" && p.owner === "demo-point"),
-  );
+  const ownedPoints = state.points.filter((p) => p.owner === state.user?.id);
   return (
     <AppContext.Provider
       value={{
         ...state,
         ready,
-        storageError,
+        bootError,
+        syncError,
+        refreshing,
         ownedPoints,
+        refresh,
+        retryInitialize: () => {
+          setReady(false);
+          setBootError("");
+          initialize();
+        },
         login,
-        demo,
+        registerAccount,
         logout,
         updateUser,
         favorite,
@@ -241,7 +266,6 @@ export function AppProvider({ children }) {
         advanceRequest,
         savePoint,
         markRead,
-        reset,
       }}
     >
       {children}

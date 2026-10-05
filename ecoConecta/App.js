@@ -8,7 +8,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { AppProvider, useApp } from "./src/context/AppContext";
-import { Icon } from "./src/components/UI";
+import { Icon, Button } from "./src/components/UI";
 import { Welcome, Login, Register } from "./src/screens/Auth";
 import { Home, DriverHome, PointHome } from "./src/screens/Home";
 import { Points, PointDetail, PointForm } from "./src/screens/Points";
@@ -48,6 +48,7 @@ function Tabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         ...screenOptions,
+        tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: "#166534",
         tabBarInactiveTintColor: "#94a3b8",
         tabBarStyle: { backgroundColor: "#ffffff", borderTopColor: "#e2e8f0" },
@@ -89,7 +90,7 @@ function Tabs() {
   );
 }
 function Routes() {
-  const { user, ready } = useApp();
+  const { user, ready, bootError, retryInitialize } = useApp();
   if (!ready)
     return (
       <View className="flex-1 items-center justify-center bg-sand">
@@ -97,6 +98,16 @@ function Routes() {
         <Text className="mt-4 font-semibold text-forest">
           Preparando um novo ciclo...
         </Text>
+      </View>
+    );
+  if (bootError)
+    return (
+      <View className="flex-1 justify-center bg-sand p-6">
+        <Text className="mb-3 text-2xl font-bold text-ink">
+          Não foi possível conectar
+        </Text>
+        <Text className="mb-5 text-base text-slate-600">{bootError}</Text>
+        <Button title="Tentar novamente" onPress={retryInitialize} />
       </View>
     );
   return (

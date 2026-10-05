@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "ecoConecta",
-    "slug": "ecoConecta",
+    "name": "EcoConecta",
+    "slug": "ecoconecta",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -15,14 +15,14 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
     },
     "plugins": [
-      "expo-font",
-      "expo-status-bar",
       "expo-secure-store"
     ]
   }

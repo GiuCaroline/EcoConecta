@@ -1,7 +1,8 @@
 import React from "react";
+import { useAction } from "../hooks/useAction";
 import { View, Text, Pressable, Switch } from "react-native";
 import { useApp } from "../context/AppContext";
-import { MATERIALS } from "../data/mock";
+import { MATERIALS } from "../data/catalog";
 import {
   Page,
   Heading,
@@ -15,7 +16,7 @@ import {
 } from "../components/UI";
 
 export function Home({ navigation }) {
-  const { user, points, requests, notifications, storageError } = useApp();
+  const { user, points, requests, notifications } = useApp();
   const completed = requests.filter(
     (r) => r.residentId === user.id && r.status === 4 && !r.cancelled,
   );
@@ -53,14 +54,6 @@ export function Home({ navigation }) {
           )}
         </Pressable>
       </View>
-      {storageError && (
-        <Card>
-          <Text className="text-sm text-red-600">
-            Não foi possível salvar no aparelho. Seus dados atuais continuam
-            disponíveis nesta sessão.
-          </Text>
-        </Card>
-      )}
       <Heading
         title={`Olá, ${user.name.split(" ")[0]} 👋`}
         subtitle="O que vamos transformar hoje?"
@@ -157,6 +150,12 @@ export function Home({ navigation }) {
             onPress={() => navigation.navigate("PointDetail", { id: p.id })}
           />
         ))}
+      {!points.some((p) => p.active) && (
+        <Empty
+          title="Ainda não há pontos disponíveis"
+          body="Um responsável precisa cadastrar um ponto para receber os materiais."
+        />
+      )}
       <Button
         title="Como preparar seus materiais"
         secondary
@@ -168,6 +167,7 @@ export function Home({ navigation }) {
 }
 export function DriverHome({ navigation }) {
   const { user, requests, updateUser } = useApp();
+  const { busy, run } = useAction("Disponibilidade");
   const jobs = requests.filter(
     (r) =>
       r.driverId === user.id && r.status > 0 && r.status < 4 && !r.cancelled,
@@ -192,13 +192,14 @@ export function DriverHome({ navigation }) {
                 : "Disponível para coletas"}
             </Text>
             <Text className="mt-1 text-sm text-slate-500">
-              Controle a disponibilidade neste protótipo.
+              Ative para aceitar novas solicitações de coleta.
             </Text>
           </View>
           <Switch
             accessibilityLabel="Disponível para coletas"
             value={user.online !== false}
-            onValueChange={(online) => updateUser({ online })}
+            disabled={busy}
+            onValueChange={(online) => run(() => updateUser({ online }))}
             trackColor={{ false: "#cbd5e1", true: "#166534" }}
           />
         </View>
