@@ -1,3 +1,4 @@
+import { Quantum } from "./src/screens/Quantum";
 import "./global.css";
 import React from "react";
 import { View, Text, ActivityIndicator } from "react-native";
@@ -118,6 +119,13 @@ function Routes() {
               component={RequestDetail}
               options={{ title: "Acompanhar coleta" }}
             />
+            {user.role === "driver" && (
+              <Stack.Screen
+                name="Quantum"
+                component={Quantum}
+                options={{ title: "Sugestão quântica" }}
+              />
+            )}
             {user.role === "resident" && (
               <Stack.Screen
                 name="NewRequest"

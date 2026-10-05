@@ -217,6 +217,11 @@ export function DriverHome({ navigation }) {
           <Text className="text-xs text-slate-500">Pedidos disponíveis</Text>
         </Card>
       </View>
+      <Button
+        title="Sugestão quântica de coletas"
+        icon="hardware-chip-outline"
+        onPress={() => navigation.navigate("Quantum")}
+      />
       <Text className="mb-3 text-lg font-bold text-ink">Minha rota</Text>
       {jobs.length ? (
         jobs.map((r) => (
