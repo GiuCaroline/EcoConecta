@@ -13,7 +13,8 @@
       "adaptiveIcon": {
         "backgroundImage": "./assets/logo.png"
       },
-      "softwareKeyboardLayoutMode": "resize"
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "com.giucaroline.ecoconecta"
     },
     "web": {
       "favicon": "./assets/logo.png",
