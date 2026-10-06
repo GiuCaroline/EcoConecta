@@ -3,7 +3,7 @@ export function createApiClient({
   baseUrl,
   storage,
   fetcher = fetch,
-  timeoutMs = 20000,
+  timeoutMs = 60000,
 }) {
   let onExpired = () => {};
   const getSessionToken = () => storage.get();
