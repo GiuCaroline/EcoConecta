@@ -21,20 +21,12 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-font"
     ],
     "extra": {
       "eas": {
         "projectId": "fc90da71-d224-4321-a836-bcba6a86e5de"
-      }
-    },
-    "build": {
-      "preview": {
-        "distribution": "internal",
-        "environment": "preview",
-        "android": {
-          "buildType": "apk"
-        }
       }
     }
   }
