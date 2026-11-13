@@ -6,6 +6,7 @@ import { registerQuantumRoutes } from "./quantum.js";
 
 const MASKED_ADDRESS = "Endereço completo disponível após aceitar a coleta";
 const ROLES = ["resident", "driver", "point"];
+const MATERIAL_IDS = new Set(["paper", "plastic", "glass", "metal", "electronic", "oil"]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 class HttpError extends Error {
@@ -53,7 +54,10 @@ function publicRequest(row, viewer) {
     residentId: row.resident_id,
     residentName: row.resident_name,
     pointId: row.point_id,
+    pointName: row.point_name || "",
+    pointAddress: row.point_address || "",
     driverId: row.driver_id,
+    driverName: row.driver_name || null,
     materials: row.materials || [],
     quantity: Number(row.quantity),
     date: /^\d{4}-\d{2}-\d{2}$/.test(row.date || "")
@@ -265,7 +269,7 @@ export function createApp(pool, options = {}) {
 
   // ---------- Points ----------
   const validMaterials = (m) =>
-    Array.isArray(m) && m.length > 0 && m.every((x) => typeof x === "string" && x);
+    Array.isArray(m) && m.length > 0 && m.every((x) => typeof x === "string" && MATERIAL_IDS.has(x));
 
   app.get(
     "/api/points",
@@ -425,20 +429,15 @@ export function createApp(pool, options = {}) {
   );
 
   // ---------- Requests ----------
-  const REQUEST_SELECT = `SELECT r.*, u.name AS resident_name
+  const REQUEST_SELECT = `SELECT r.*, u.name AS resident_name, d.name AS driver_name,
+      p.name AS point_name, p.address AS point_address, p.owner_id AS point_owner_id
     FROM requests r
     JOIN users u ON u.id = r.resident_id
+    LEFT JOIN users d ON d.id = r.driver_id
     LEFT JOIN points p ON p.id = r.point_id`;
 
   async function getRequest(id) {
-    const { rows } = await q(
-      `SELECT r.*, u.name AS resident_name, p.owner_id AS point_owner_id, p.name AS point_name
-       FROM requests r
-       JOIN users u ON u.id = r.resident_id
-       LEFT JOIN points p ON p.id = r.point_id
-       WHERE r.id=$1`,
-      [id],
-    );
+    const { rows } = await q(`${REQUEST_SELECT} WHERE r.id=$1`, [id]);
     return rows[0];
   }
 
@@ -463,9 +462,14 @@ export function createApp(pool, options = {}) {
         fields.pointId = "Ponto inválido.";
       if (Object.keys(fields).length)
         throw new HttpError(400, "Confira os dados informados.", fields);
-      const point = await q("SELECT id FROM points WHERE id=$1 AND active=true", [b.pointId]);
+      const point = await q("SELECT id, materials FROM points WHERE id=$1 AND active=true", [b.pointId]);
       if (!point.rows.length)
         throw new HttpError(400, "Ponto indisponível.", { pointId: "Ponto indisponível." });
+      const accepted = new Set(point.rows[0].materials || []);
+      if (!b.materials.every((m) => accepted.has(m)))
+        throw new HttpError(400, "O ponto selecionado não recebe todos os materiais.", {
+          pointId: "Selecione um ponto que receba todos os materiais escolhidos.",
+        });
       const id = randomUUID();
       await q(
         `INSERT INTO requests (id,resident_id,point_id,materials,quantity,date,period,address,notes)
@@ -558,6 +562,8 @@ export function createApp(pool, options = {}) {
         if (action === "accept") {
           if (me.role !== "driver")
             throw new HttpError(403, "Apenas motoristas podem aceitar coletas.");
+          if (me.online === false)
+            throw new HttpError(409, "Ative sua disponibilidade para aceitar coletas.");
         } else if (action === "receive") {
           if (current.point_owner_id !== me.id)
             throw new HttpError(403, "Apenas o responsável pelo ponto pode confirmar o recebimento.");
@@ -581,6 +587,13 @@ export function createApp(pool, options = {}) {
         if (!updated.rows.length)
           throw new HttpError(409, "A coleta não está na etapa esperada.");
         await notify(current.resident_id, "Atualização da coleta", step.msg);
+        if (action === "deliver" && current.point_owner_id) {
+          await notify(
+            current.point_owner_id,
+            "Entrega aguardando confirmação",
+            "Um motorista entregou materiais no seu ponto. Confirme o recebimento.",
+          );
+        }
       }
       res.json({ request: publicRequest(await getRequest(id), me) });
     }),
@@ -597,10 +610,15 @@ export function createApp(pool, options = {}) {
       return res.status(400).json({ error: { message: "JSON inválido." } });
     const status = err instanceof HttpError ? err.status : err?.status || 500;
     if (status >= 500) console.error(err);
+    const fields = err.fields
+      ? Array.isArray(err.fields)
+        ? err.fields
+        : Object.entries(err.fields).map(([path, message]) => ({ path, message }))
+      : undefined;
     res.status(status).json({
       error: {
         message: status >= 500 ? "Erro interno do servidor." : err.message,
-        ...(err.fields ? { fields: err.fields } : {}),
+        ...(fields ? { fields } : {}),
       },
     });
   });
