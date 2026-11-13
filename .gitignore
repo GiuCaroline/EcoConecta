@@ -1,0 +1,24 @@
+# Ignorar arquivos pessoais, conversas e rascunhos da raiz para não irem ao GitHub
+chat.md
+chat.txt
+*.docx
+*.pdf
+extracted_doc_rev13.txt
+.agent-board.json
+
+# Dependências e arquivos temporários
+node_modules/
+**/node_modules/
+.expo/
+**/.expo/
+dist/
+build/
+*.log
+.env
+**/.env
+!.env.example
+!**/.env.example
+.pglite/
+**/.pglite/
+__pycache__/
+**/__pycache__/
